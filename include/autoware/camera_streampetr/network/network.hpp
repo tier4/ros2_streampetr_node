@@ -74,31 +74,6 @@ using autoware::tensorrt_common::Profiler;
 using autoware::tensorrt_common::TrtCommon;
 using autoware::tensorrt_common::TrtCommonConfig;
 
-// workaround for TensorRT 8.5 compatibility
-inline nvinfer1::DataType getTensorDataTypeCompat(
-  nvinfer1::ICudaEngine* engine,
-  const char* name)
-{
-  int idx = engine->getBindingIndex(name);
-  if (idx < 0) {
-      throw std::runtime_error(std::string("Tensor not found: ") + name);
-  }
-  return engine->getBindingDataType(idx);
-}
-
-inline nvinfer1::TensorIOMode getTensorIOModeCompat(
-  nvinfer1::ICudaEngine* engine,
-  const char* name)
-{
-  int idx = engine->getBindingIndex(name);
-  if (idx < 0) {
-      throw std::runtime_error(std::string("Tensor not found: ") + name);
-  }
-  return engine->bindingIsInput(idx)
-      ? nvinfer1::TensorIOMode::kINPUT
-      : nvinfer1::TensorIOMode::kOUTPUT;
-}
-
 class SubNetwork : public TrtCommon
 {
 public:
@@ -111,9 +86,14 @@ public:
     for (int n = 0; n < getNbIOTensors(); n++) {
       std::string name = getIOTensorName(n);
       Dims d = getTensorShape(name.c_str());
-      DataType dtype = getTensorDataTypeCompat(getEngine(), name.c_str());
+      auto dtype_opt = getTensorDataType(name.c_str());
+      if (!dtype_opt.has_value()) {
+        RCLCPP_WARN(logger, "Warning: Could not get data type for tensor: %s", name.c_str());
+        return false;
+      }
+      DataType dtype = dtype_opt.value();
       bindings[name] = std::make_shared<Tensor>(name, d, dtype);
-      bindings[name]->iomode = getTensorIOModeCompat(getEngine(), name.c_str());
+      bindings[name]->iomode = getTensorIOMode(name.c_str());
 
       std::stringstream ss;
       ss << *(bindings[name]);
